@@ -216,7 +216,7 @@ export function getStartAndEndOfWeek(): { startOfWeek: string; endOfWeek: string
  */
 export async function fetchWeeklyCompletedTasksCount(userId: string): Promise<{ count: number; error: any }> {
   if (!isSupabaseConfigured) {
-    return { count: 5, error: null }; // Mock fallback for preview mode
+    return { count: 0, error: new Error('Supabase is not configured.') };
   }
 
   const { startOfWeek, endOfWeek } = getStartAndEndOfWeek();
@@ -253,20 +253,9 @@ export async function fetchWeeklyCompletedTasksCount(userId: string): Promise<{ 
  */
 export async function fetchWeeklyLeaderboard(): Promise<{ leaderboard: WeeklyLeaderboardEntry[]; error: any }> {
   if (!isSupabaseConfigured) {
-    // Return mock leaderboard entries when Supabase credentials are missing
-    const mockLeaderboard: WeeklyLeaderboardEntry[] = [
-      { rank: 1, userId: 'u-1', name: 'Aarav Sharma', target_exam: 'JEE Advanced 2026', tasksCompletedThisWeek: 28 },
-      { rank: 2, userId: 'u-2', name: 'Ananya Gupta', target_exam: 'NEET UG 2026', tasksCompletedThisWeek: 24 },
-      { rank: 3, userId: 'u-3', name: 'Rohan Verma', target_exam: 'CBSE Class 12 Boards', tasksCompletedThisWeek: 21 },
-      { rank: 4, userId: 'u-4', name: 'Priya Patel', target_exam: 'JEE Main 2027', tasksCompletedThisWeek: 18 },
-      { rank: 5, userId: 'u-5', name: 'Karan Singh', target_exam: 'BITSAT 2026', tasksCompletedThisWeek: 15 },
-      { rank: 6, userId: 'u-6', name: 'Sanya Malhotra', target_exam: 'CUET 2026', tasksCompletedThisWeek: 13 },
-      { rank: 7, userId: 'u-7', name: 'Devansh Joshi', target_exam: 'JEE Main 2026', tasksCompletedThisWeek: 11 },
-      { rank: 8, userId: 'u-8', name: 'Diya Reddy', target_exam: 'CBSE Class 12 Boards', tasksCompletedThisWeek: 9 },
-      { rank: 9, userId: 'u-9', name: 'Aditya Roy', target_exam: 'NDA 2026', tasksCompletedThisWeek: 7 },
-      { rank: 10, userId: 'u-10', name: 'Ishita Kapoor', target_exam: 'NEET UG 2027', tasksCompletedThisWeek: 5 },
-    ];
-    return { leaderboard: mockLeaderboard, error: null };
+    // No Supabase connection configured — return an empty leaderboard rather
+    // than fabricated names, so the UI never shows fake data.
+    return { leaderboard: [], error: new Error('Supabase is not configured.') };
   }
 
   try {
@@ -428,16 +417,7 @@ export async function createDbTask(
   const targetDate = dateStr || new Date().toISOString().split('T')[0];
 
   if (!isSupabaseConfigured) {
-    const mockTask: DbTask = {
-      id: `local-${Date.now()}`,
-      user_id: userId,
-      title,
-      category,
-      status: 'pending',
-      date: targetDate,
-      created_at: new Date().toISOString()
-    };
-    return { task: mockTask, error: null };
+    return { task: null, error: new Error('Supabase is not configured.') };
   }
 
   const newTask = {
