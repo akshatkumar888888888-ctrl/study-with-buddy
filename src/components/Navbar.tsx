@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { BookOpen, Users, Calendar, Award, CheckSquare, Menu, X, LogIn, LayoutDashboard } from 'lucide-react';
 import { signInWithGoogle } from '../utils/supabase';
+import { User } from '@supabase/supabase-js';
 
 interface NavbarProps {
   currentView: 'home' | 'dashboard';
   setCurrentView: (view: 'home' | 'dashboard') => void;
+  authUser: User | null;
 }
 
 /**
@@ -17,21 +19,23 @@ interface NavbarProps {
  * - "Sign In" button calling Supabase Google OAuth
  * - Fully responsive for mobile screens
  */
-export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) => {
+export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, authUser }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [showAuthNotice, setShowAuthNotice] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  // Handle the Sign In click as required
+  // Handle the Sign In click: trigger real Supabase Google OAuth.
+  // On success, the browser redirects to Google then back to this site —
+  // no further action needed here. On failure, surface the real error.
   const handleSignIn = async () => {
-    // Required action: log "Sign in clicked" to browser console
-    console.log("Sign in clicked - Invoking Supabase OAuth");
-    
-    // Show user-friendly notification
-    setShowAuthNotice(true);
-    setTimeout(() => setShowAuthNotice(false), 3500);
-
-    // Call Supabase auth Google provider
-    await signInWithGoogle();
+    setAuthError(null);
+    const { error } = await signInWithGoogle();
+    if (error) {
+      console.error("Sign in failed:", error.message);
+      setAuthError(error.message);
+      setTimeout(() => setAuthError(null), 5000);
+    }
+    // On success, signInWithOAuth redirects the browser away immediately —
+    // nothing else to do here.
   };
 
   return (
@@ -98,17 +102,23 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
           {/* Desktop Auth & Get Started Buttons */}
           <div className="hidden md:flex items-center gap-4">
-            <button
-              onClick={handleSignIn}
-              className="text-sm font-semibold text-slate-700 hover:text-indigo-600 transition-colors px-2 py-1"
-            >
-              Sign In
-            </button>
+            {authUser ? (
+              <span className="text-sm font-semibold text-slate-700 px-2 py-1">
+                {authUser.user_metadata?.full_name || authUser.email}
+              </span>
+            ) : (
+              <button
+                onClick={handleSignIn}
+                className="text-sm font-semibold text-slate-700 hover:text-indigo-600 transition-colors px-2 py-1"
+              >
+                Sign In
+              </button>
+            )}
             <button
               onClick={() => setCurrentView('dashboard')}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-full text-sm font-bold shadow-lg shadow-indigo-100 transition-all active:scale-95"
             >
-              Get Started
+              {authUser ? 'Dashboard' : 'Get Started'}
             </button>
           </div>
 
@@ -162,15 +172,21 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             Features
           </a>
           <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
-            <button
-              onClick={() => {
-                handleSignIn();
-                setMobileMenuOpen(false);
-              }}
-              className="w-full text-slate-700 hover:text-indigo-600 font-semibold py-2 text-center"
-            >
-              Sign In
-            </button>
+            {authUser ? (
+              <span className="w-full text-slate-700 font-semibold py-2 text-center">
+                {authUser.user_metadata?.full_name || authUser.email}
+              </span>
+            ) : (
+              <button
+                onClick={() => {
+                  handleSignIn();
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full text-slate-700 hover:text-indigo-600 font-semibold py-2 text-center"
+              >
+                Sign In
+              </button>
+            )}
             <button
               onClick={() => {
                 setCurrentView('dashboard');
@@ -184,13 +200,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
         </div>
       )}
 
-      {/* Auth Toast Notification */}
-      {showAuthNotice && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-slate-800 animate-bounce">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400"></div>
+      {/* Auth Error Toast — only shown if sign-in actually fails */}
+      {authError && (
+        <div className="fixed bottom-6 right-6 z-50 bg-red-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-red-800">
+          <div className="w-2.5 h-2.5 rounded-full bg-red-400"></div>
           <div className="text-sm">
-            <p className="font-semibold">Sign in clicked!</p>
-            <p className="text-xs text-slate-400">Logged to console. Ready for Supabase Auth integration.</p>
+            <p className="font-semibold">Sign in failed</p>
+            <p className="text-xs text-red-200">{authError}</p>
           </div>
         </div>
       )}
