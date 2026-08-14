@@ -4,7 +4,7 @@ import { Hero } from './components/Hero';
 import { Features } from './components/Features';
 import { Dashboard } from './components/Dashboard';
 import { Footer } from './components/Footer';
-import { supabase, isSupabaseConfigured } from './utils/supabase';
+import { supabase, isSupabaseConfigured, captureGoogleTokensOnSignIn } from './utils/supabase';
 import { User } from '@supabase/supabase-js';
 
 /**
@@ -35,9 +35,18 @@ export default function App() {
 
     // Keep auth state in sync for the lifetime of the app (login, logout,
     // token refresh, etc).
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthUser(session?.user ?? null);
       if (session?.user) setCurrentView('dashboard');
+
+      // Right after Google sign-in, grab the refresh token (if this session has
+      // one) and hand it to the backend so Calendar/Tasks sync can work later.
+      if (event === 'SIGNED_IN' && session) {
+        captureGoogleTokensOnSignIn({
+          provider_token: (session as any).provider_token,
+          provider_refresh_token: (session as any).provider_refresh_token,
+        });
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
