@@ -66,6 +66,85 @@ create table if not exists public.tasks (
 
 ---
 
+## 🔗 Google Calendar & Google Tasks Two-Way Sync
+
+Study tasks added in the app are pushed to **Google Tasks** (which shows up right
+inside Google Calendar's built-in Tasks panel) and to a matching **all-day Calendar
+event**. Marking a task done/undone, or deleting it, updates both. A manual
+**"Sync now"** button pulls back anything created or changed directly in Google.
+
+### 1. Enable the Google APIs
+In the same Google Cloud project used for sign-in (from the OAuth setup above):
+1. Go to **APIs & Services** -> **Library**.
+2. Enable **Google Calendar API**.
+3. Enable **Google Tasks API**.
+
+### 2. Add the extra scopes to the OAuth consent screen
+1. **APIs & Services** -> **OAuth consent screen** -> **Data Access** -> **Add or Remove Scopes**.
+2. Add:
+   - `https://www.googleapis.com/auth/tasks`
+   - `https://www.googleapis.com/auth/calendar.events`
+3. Save. (If your consent screen is in "Testing" mode, make sure your Google account is added under **Test users**.)
+
+### 3. Run the sync migration
+In the Supabase SQL Editor, run section **9** at the bottom of `supabase_schema.sql`
+(creates `google_tokens`, adds `google_task_id`/`google_event_id` to `tasks`, and
+`google_connected` to `profiles`).
+
+### 4. Deploy the Edge Functions
+The three functions live in `supabase/functions/`. You'll need the
+[Supabase CLI](https://supabase.com/docs/guides/cli) installed and logged in:
+```bash
+supabase link --project-ref <YOUR-SUPABASE-PROJECT-REF>
+
+# Same Client ID/Secret as your Google provider in step 2 of the OAuth setup above
+supabase secrets set GOOGLE_CLIENT_ID=<your-google-client-id>
+supabase secrets set GOOGLE_CLIENT_SECRET=<your-google-client-secret>
+
+supabase functions deploy google-store-tokens
+supabase functions deploy google-sync-task
+supabase functions deploy google-sync-pull
+```
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are provided
+automatically inside every Edge Function — no need to set those yourself.
+
+### 5. (Optional) Auto-pull on a schedule
+Without this, sync still happens automatically on every add/complete/delete —
+this step only affects picking up changes made *directly in Google* without the
+user pressing "Sync now". In the Supabase SQL Editor:
+```sql
+select cron.schedule(
+  'google-sync-pull-every-15-min',
+  '*/15 * * * *',
+  $$
+  select net.http_post(
+    url := 'https://<YOUR-SUPABASE-PROJECT-REF>.supabase.co/functions/v1/google-sync-pull',
+    headers := jsonb_build_object('Authorization', 'Bearer <A-USER-JWT-OR-SERVICE-ROLE-KEY>')
+  );
+  $$
+);
+```
+(Requires the `pg_cron` and `pg_net` extensions, enabled under **Database** ->
+**Extensions**. Since this function is per-user, a fuller setup would loop over
+all rows in `google_tokens` — the manual "Sync now" button in the dashboard covers
+this without any of that extra plumbing.)
+
+### How it works
+- **Sign in with Google** now also requests Calendar + Tasks permission
+  (`src/utils/supabase.ts`). Because `access_type: offline` + `prompt: consent`
+  are set, Google returns a long-lived refresh token on that first consent.
+- `captureGoogleTokensOnSignIn` (called from `App.tsx`) hands that refresh token
+  to the `google-store-tokens` function, which stores it in the server-only
+  `google_tokens` table (RLS-locked — only Edge Functions using the service role
+  key can read it).
+- Every add / complete / uncomplete / delete calls `google-sync-task`, which
+  refreshes a short-lived Google access token from the stored refresh token and
+  pushes the change to Google Tasks + Calendar.
+- The **Sync now** button calls `google-sync-pull`, which pushes anything not
+  yet synced and pulls in tasks/events created or edited directly in Google.
+
+---
+
 ## ⚡ Deployment on Vercel
 
 Follow these steps to deploy "Study with Buddy" on Vercel:
