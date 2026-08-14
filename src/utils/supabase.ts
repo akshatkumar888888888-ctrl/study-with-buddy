@@ -57,7 +57,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
  * @param redirectTo Optional custom redirect URL after login
  */
 export async function signInWithGoogle(redirectTo?: string) {
-  const redirectUrl = redirectTo || (typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined);
+  const redirectUrl = redirectTo || (typeof window !== 'undefined' ? window.location.origin : undefined);
 
   if (!isSupabaseConfigured) {
     console.warn("Supabase credentials not configured. Using demo auth fallback.");
