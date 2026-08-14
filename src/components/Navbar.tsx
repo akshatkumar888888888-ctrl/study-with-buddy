@@ -38,6 +38,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, aut
     // nothing else to do here.
   };
 
+  // Navigate into the Dashboard view and scroll to a specific section inside it.
+  // These aren't real pages (this is a single-page app with no router), so
+  // plain <a href="/rooms"> links would 404 on the live site. We switch the
+  // in-app view, then scroll to the section once it's rendered.
+  const goToDashboardSection = (sectionId?: string) => {
+    setCurrentView('dashboard');
+    if (sectionId) {
+      setTimeout(() => {
+        document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
+  };
+
   return (
     <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-sm border-b border-slate-100 transition-all">
       <div className="max-w-7xl mx-auto px-6 md:px-10">
@@ -73,8 +86,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, aut
             >
               Home
             </button>
-            <a
-              href="/dashboard"
+            <button
+              onClick={() => goToDashboardSection()}
               className={`flex items-center gap-1.5 transition-colors hover:text-indigo-600 ${
                 currentView === 'dashboard'
                   ? 'text-indigo-600 font-bold'
@@ -83,21 +96,21 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, aut
             >
               <LayoutDashboard className="w-4 h-4" />
               Dashboard
-            </a>
-            <a
-              href="/rooms"
+            </button>
+            <button
+              onClick={() => goToDashboardSection('rooms-section')}
               className="hover:text-indigo-600 transition-colors flex items-center gap-1"
             >
               <Users className="w-4 h-4" />
               Buddy Rooms 🎧
-            </a>
-            <a
-              href="/leaderboard"
+            </button>
+            <button
+              onClick={() => goToDashboardSection('leaderboard-section')}
               className="hover:text-indigo-600 transition-colors flex items-center gap-1"
             >
               <Award className="w-4 h-4" />
               Leaderboard 🏆
-            </a>
+            </button>
           </nav>
 
           {/* Desktop Auth & Get Started Buttons */}
