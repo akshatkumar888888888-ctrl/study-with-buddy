@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { 
   CheckSquare, Flame, Users, Trophy, Hourglass, Plus, Trash2, 
   CheckCircle2, Circle, Play, Pause, RotateCcw, Volume2, VolumeX,
-  Sparkles, Award, Calendar, BookOpen, Clock, ChevronRight, ChevronLeft, UserCheck, LogOut, LogIn
+  Sparkles, Award, Calendar, BookOpen, Clock, ChevronRight, ChevronLeft, UserCheck, LogOut, LogIn,
+  RefreshCw, CalendarCheck2
 } from 'lucide-react';
 import { Task, TaskCategory, Profile, WeeklyLeaderboardEntry } from '../types';
 import {
   supabase, signInWithGoogle, signOutUser, isSupabaseConfigured,
   fetchUserProfile, fetchTasksForToday, createDbTask, toggleDbTaskStatus,
-  deleteDbTask, updateStreakOnTaskComplete, fetchWeeklyLeaderboard
+  deleteDbTask, updateStreakOnTaskComplete, fetchWeeklyLeaderboard,
+  syncTaskToGoogle, pullGoogleSync
 } from '../utils/supabase';
 import { User } from '@supabase/supabase-js';
 
@@ -50,6 +52,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
   // Real weekly leaderboard, fetched from the get_weekly_leaderboard() function.
   const [leaderboard, setLeaderboard] = useState<WeeklyLeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
+
+  // Google Calendar / Tasks sync state — pushes on every add/complete/delete,
+  // and a manual "Sync now" pulls back anything changed directly in Google.
+  const [googleSyncing, setGoogleSyncing] = useState(false);
+  const [googleSyncMessage, setGoogleSyncMessage] = useState<string | null>(null);
+
+  const refreshTasksForSelectedDate = async () => {
+    if (!authUser) return;
+    setTasksLoading(true);
+    const { tasks: dbTasks } = await fetchTasksForToday(authUser.id, selectedDate);
+    setTasks(dbTasks.map(t => ({
+      id: t.id, title: t.title, category: t.category, completed: t.status === 'done',
+      estimatedMinutes: 30, googleTaskId: t.google_task_id, googleEventId: t.google_event_id,
+    })));
+    setTasksLoading(false);
+  };
+
+  const handleGoogleSyncNow = async () => {
+    if (!authUser) return;
+    setGoogleSyncing(true);
+    setGoogleSyncMessage(null);
+    const result = await pullGoogleSync();
+    setGoogleSyncing(false);
+
+    if (!result.synced) {
+      setGoogleSyncMessage(result.error ? 'Sync failed — try again in a moment.' : 'Connect Google first to sync.');
+      return;
+    }
+    setGoogleSyncMessage(
+      `Synced — ${result.pushed || 0} pushed, ${result.pulledIn || 0} new, ${result.pulledUpdates || 0} updated.`
+    );
+    await refreshTasksForSelectedDate();
+  };
 
   // Step the selected date backward/forward by one day.
   const shiftDate = (deltaDays: number) => {
@@ -100,6 +135,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
             category: t.category,
             completed: t.status === 'done',
             estimatedMinutes: 30, // not tracked in the DB schema yet
+            googleTaskId: t.google_task_id,
+            googleEventId: t.google_event_id,
           }))
         );
         setTasksLoading(false);
@@ -178,6 +215,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
       { id: task.id, title: task.title, category: task.category, completed: false, estimatedMinutes: 30 },
       ...prev,
     ]);
+
+    // Push the new task out to Google Tasks + Calendar (no-op if not connected).
+    syncTaskToGoogle(task.id, 'upsert').then(({ synced, error }) => {
+      if (error) console.error('Google sync (add) failed:', error);
+      if (synced) refreshTasksForSelectedDate(); // pick up the returned google_task_id/google_event_id
+    });
   };
 
   // Toggle task completed state — persists to Supabase and updates streak.
@@ -201,11 +244,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
       const { profile: updated } = await updateStreakOnTaskComplete(authUser.id, profile);
       if (updated) setProfile(updated);
     }
+
+    // Reflect the completion (or un-completion) on Google Tasks + Calendar.
+    syncTaskToGoogle(id, 'upsert').then(({ error }) => {
+      if (error) console.error('Google sync (toggle) failed:', error);
+    });
   };
 
-  // Delete task — removes from Supabase too.
+  // Delete task — removes the Google Task/event first (needs the row to still
+  // exist to look up its google_task_id/google_event_id), then Supabase.
   const deleteTask = async (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
+    await syncTaskToGoogle(id, 'delete').catch(err => console.error('Google sync (delete) failed:', err));
     const { error } = await deleteDbTask(id);
     if (error) console.error('Failed to delete task:', error);
   };
@@ -337,14 +387,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
                   </div>
                 </div>
 
-                {/* Task Progress Bar */}
-                <div className="w-full sm:w-48 bg-slate-100 h-2.5 rounded-full overflow-hidden self-center">
-                  <div 
-                    className="bg-indigo-600 h-full rounded-full transition-all duration-500" 
-                    style={{ width: `${progressPercent}%` }}
-                  />
+                <div className="flex items-center gap-3">
+                  {/* Google Calendar/Tasks connection status + manual two-way sync */}
+                  {authUser && (
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                        profile?.google_connected
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-slate-50 text-slate-500 border-slate-200'
+                      }`}>
+                        <CalendarCheck2 className="w-3.5 h-3.5" />
+                        {profile?.google_connected ? 'Synced with Google' : 'Google not connected'}
+                      </span>
+                      {profile?.google_connected && (
+                        <button
+                          onClick={handleGoogleSyncNow}
+                          disabled={googleSyncing}
+                          title="Pull in changes made directly in Google Calendar/Tasks"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${googleSyncing ? 'animate-spin' : ''}`} />
+                          {googleSyncing ? 'Syncing...' : 'Sync now'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Task Progress Bar */}
+                  <div className="w-full sm:w-48 bg-slate-100 h-2.5 rounded-full overflow-hidden self-center">
+                    <div 
+                      className="bg-indigo-600 h-full rounded-full transition-all duration-500" 
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
                 </div>
               </div>
+
+              {googleSyncMessage && (
+                <p className="text-[11px] text-slate-400 -mt-3">{googleSyncMessage}</p>
+              )}
+
+              {authUser && !profile?.google_connected && (
+                <div className="flex items-center justify-between gap-3 bg-indigo-50/70 border border-indigo-100 rounded-2xl px-4 py-2.5 text-xs text-indigo-700">
+                  <span>Connect Google Calendar &amp; Tasks so your schedule and completions sync automatically.</span>
+                  <button
+                    onClick={handleGoogleSignIn}
+                    className="shrink-0 font-semibold underline underline-offset-2 hover:text-indigo-900"
+                  >
+                    Connect
+                  </button>
+                </div>
+              )}
 
               {/* Date Navigation Bar — Google Calendar-style day switcher.
                   Lets the user browse and manage tasks for any date, past or future. */}
