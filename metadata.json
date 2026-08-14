@@ -1,0 +1,6 @@
+{
+  "name": "Study with Buddy",
+  "description": "Track your daily tasks, study with friends, stay motivated, and join virtual study rooms.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
