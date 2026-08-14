@@ -350,7 +350,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
             </div>
 
             {/* FEATURE 3: Study Buddy Rooms */}
-            <div className="bg-white p-6 sm:p-7 rounded-3xl border border-slate-100 shadow-sm space-y-6">
+            <div id="rooms-section" className="bg-white p-6 sm:p-7 rounded-3xl border border-slate-100 shadow-sm space-y-6">
               
               <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                 <div className="flex items-center gap-3">
@@ -548,7 +548,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
             </div>
 
             {/* FEATURE 4: Weekly Leaderboard */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div id="leaderboard-section" className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                   <Trophy className="w-5 h-5 text-emerald-600" />
