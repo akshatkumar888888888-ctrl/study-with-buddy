@@ -14,6 +14,8 @@ export interface Task {
   completed: boolean;
   dueDate?: string;
   estimatedMinutes: number;
+  googleTaskId?: string | null; // set once this task is synced to Google Tasks
+  googleEventId?: string | null; // set once a matching Google Calendar event exists
 }
 
 // Supabase Profile interface (matches profiles table)
@@ -26,6 +28,7 @@ export interface Profile {
   longest_streak: number;
   last_active_date?: string;
   created_at?: string;
+  google_connected?: boolean; // true once the user has granted Calendar/Tasks access
 }
 
 // Supabase Task interface (matches tasks table)
@@ -38,6 +41,9 @@ export interface DbTask {
   date: string; // YYYY-MM-DD
   created_at?: string;
   completed_at?: string | null;
+  google_task_id?: string | null;
+  google_event_id?: string | null;
+  google_synced_at?: string | null;
 }
 
 // Study Buddy Room interface
