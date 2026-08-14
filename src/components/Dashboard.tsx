@@ -10,6 +10,7 @@ import { User } from '@supabase/supabase-js';
 
 interface DashboardProps {
   onBackToHome: () => void;
+  authUser: User | null;
 }
 
 // Initial sample tasks for Class 12 student
@@ -36,35 +37,19 @@ const INITIAL_LEADERBOARD: LeaderboardUser[] = [
   { rank: 5, name: 'Akshat Kumar (You)', avatar: 'AK', studyHours: 26.4, streakDays: 7, points: 880 },
 ];
 
-export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome }) => {
-  // Auth state
-  const [authUser, setAuthUser] = useState<User | null>(null);
-
-  useEffect(() => {
-    async function getInitialUser() {
-      if (isSupabaseConfigured) {
-        const { data: { user } } = await supabase.auth.getUser();
-        setAuthUser(user);
-      }
-    }
-    getInitialUser();
-
-    if (isSupabaseConfigured) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        setAuthUser(session?.user ?? null);
-      });
-      return () => subscription.unsubscribe();
-    }
-  }, []);
+export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) => {
+  // Auth state now lives in App.tsx and is passed down as a prop, so both
+  // the Navbar and Dashboard always agree on whether someone is signed in.
 
   const handleGoogleSignIn = async () => {
-    console.log("Sign in clicked - Initiating Supabase Google OAuth");
-    await signInWithGoogle();
+    const { error } = await signInWithGoogle();
+    if (error) console.error("Sign in failed:", error.message);
   };
 
   const handleSignOut = async () => {
     await signOutUser();
-    setAuthUser(null);
+    // No need to setAuthUser here — App.tsx's onAuthStateChange listener
+    // will pick up the sign-out and update the shared authUser state.
   };
 
   // Tasks state
