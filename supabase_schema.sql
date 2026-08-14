@@ -127,3 +127,33 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ==============================================================================
+-- 9. GOOGLE CALENDAR / GOOGLE TASKS TWO-WAY SYNC
+-- ==============================================================================
+-- Run this section after connecting the "Study with Buddy" Google OAuth client
+-- and deploying the supabase/functions/google-* Edge Functions (see README).
+
+-- 9a. Track which app task maps to which Google Task / Calendar event.
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS google_task_id TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS google_event_id TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS google_synced_at TIMESTAMPTZ;
+
+-- 9b. Let the dashboard show a "Connected to Google" badge without exposing tokens.
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS google_connected BOOLEAN NOT NULL DEFAULT false;
+
+-- 9c. Server-only table holding each user's Google refresh/access token.
+-- RLS is enabled with NO policies for `authenticated`/`anon` — only the Edge
+-- Functions (using the service_role key, which bypasses RLS) can read or
+-- write this table. Never expose this table to the browser client.
+CREATE TABLE IF NOT EXISTS public.google_tokens (
+  user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+  refresh_token TEXT NOT NULL,
+  access_token TEXT,
+  access_token_expires_at TIMESTAMPTZ,
+  tasklist_id TEXT,
+  tasks_last_sync TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE public.google_tokens ENABLE ROW LEVEL SECURITY;
+-- (Intentionally no CREATE POLICY here — see comment above.)
