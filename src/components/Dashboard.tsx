@@ -4,38 +4,18 @@ import {
   CheckCircle2, Circle, Play, Pause, RotateCcw, Volume2, VolumeX,
   Sparkles, Award, Calendar, BookOpen, Clock, ChevronRight, UserCheck, LogOut, LogIn
 } from 'lucide-react';
-import { Task, TaskCategory, StudyRoom, LeaderboardUser, Exam } from '../types';
-import { supabase, signInWithGoogle, signOutUser, isSupabaseConfigured } from '../utils/supabase';
+import { Task, TaskCategory, Profile, WeeklyLeaderboardEntry } from '../types';
+import {
+  supabase, signInWithGoogle, signOutUser, isSupabaseConfigured,
+  fetchUserProfile, fetchTasksForToday, createDbTask, toggleDbTaskStatus,
+  deleteDbTask, updateStreakOnTaskComplete, fetchWeeklyLeaderboard
+} from '../utils/supabase';
 import { User } from '@supabase/supabase-js';
 
 interface DashboardProps {
   onBackToHome: () => void;
   authUser: User | null;
 }
-
-// Initial sample tasks for Class 12 student
-const INITIAL_TASKS: Task[] = [
-  { id: '1', title: 'Solve 15 Optics numerical questions (Ray Optics)', category: 'Physics', completed: true, estimatedMinutes: 45 },
-  { id: '2', title: 'Revise Organic Chemistry Reaction Mechanisms (Aldehydes & Ketones)', category: 'Chemistry', completed: false, estimatedMinutes: 30 },
-  { id: '3', title: 'Integration by Parts - Exercise 7.6 NCERT', category: 'Math', completed: false, estimatedMinutes: 60 },
-  { id: '4', title: 'Read Poem "Keeping Quiet" & practice short answers', category: 'English', completed: true, estimatedMinutes: 20 },
-];
-
-// Initial Study Buddy Rooms
-const INITIAL_ROOMS: StudyRoom[] = [
-  { id: 'r1', name: 'Class 12 Physics Numerical Grind', subject: 'Physics', activeMembers: 4, maxMembers: 6, isPrivate: false, hostName: 'Rohan Sharma', tags: ['Ray Optics', 'NCERT'] },
-  { id: 'r2', name: 'Late Night Calculus & Vectors', subject: 'Mathematics', activeMembers: 3, maxMembers: 5, isPrivate: false, hostName: 'Priya Patel', tags: ['Calculus', 'JEE Prep'] },
-  { id: 'r3', name: 'Silent Pomodoro - Organic Chemistry', subject: 'Chemistry', activeMembers: 5, maxMembers: 8, isPrivate: false, hostName: 'Ananya Roy', tags: ['Pomodoro 25/5', 'Quiet'] },
-];
-
-// Initial Leaderboard
-const INITIAL_LEADERBOARD: LeaderboardUser[] = [
-  { rank: 1, name: 'Siddharth Verma', avatar: 'SV', studyHours: 38.5, streakDays: 14, points: 1420, badge: 'Gold Scholar 🥇' },
-  { rank: 2, name: 'Meera Nambiar', avatar: 'MN', studyHours: 35.0, streakDays: 11, points: 1280, badge: 'Silver Scholar 🥈' },
-  { rank: 3, name: 'Rohan Sharma', avatar: 'RS', studyHours: 32.2, streakDays: 9, points: 1150, badge: 'Bronze Scholar 🥉' },
-  { rank: 4, name: 'Priya Patel', avatar: 'PP', studyHours: 29.8, streakDays: 8, points: 990 },
-  { rank: 5, name: 'Akshat Kumar (You)', avatar: 'AK', studyHours: 26.4, streakDays: 7, points: 880 },
-];
 
 export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) => {
   // Auth state now lives in App.tsx and is passed down as a prop, so both
@@ -52,14 +32,69 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
     // will pick up the sign-out and update the shared authUser state.
   };
 
-  // Tasks state
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
+  // Real profile data (name, current streak) from Supabase — no fallback mock.
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  // Tasks state — starts empty and is loaded from Supabase for the signed-in user.
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskCategory, setNewTaskCategory] = useState<TaskCategory>('Physics');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
-  // Active Room State
-  const [activeRoom, setActiveRoom] = useState<StudyRoom | null>(null);
+  // Real weekly leaderboard, fetched from the get_weekly_leaderboard() function.
+  const [leaderboard, setLeaderboard] = useState<WeeklyLeaderboardEntry[]>([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(true);
+
+  // Load profile + today's tasks whenever the signed-in user changes.
+  useEffect(() => {
+    if (!authUser || !isSupabaseConfigured) {
+      setProfile(null);
+      setTasks([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      const { profile: p } = await fetchUserProfile(
+        authUser.id,
+        authUser.email,
+        authUser.user_metadata?.full_name
+      );
+      if (!cancelled) setProfile(p);
+
+      setTasksLoading(true);
+      const { tasks: dbTasks } = await fetchTasksForToday(authUser.id);
+      if (!cancelled) {
+        setTasks(
+          dbTasks.map(t => ({
+            id: t.id,
+            title: t.title,
+            category: t.category,
+            completed: t.status === 'done',
+            estimatedMinutes: 30, // not tracked in the DB schema yet
+          }))
+        );
+        setTasksLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [authUser?.id]);
+
+  // Load the real weekly leaderboard once on mount (visible to everyone, signed in or not).
+  useEffect(() => {
+    let cancelled = false;
+    setLeaderboardLoading(true);
+    fetchWeeklyLeaderboard().then(({ leaderboard: lb }) => {
+      if (!cancelled) {
+        setLeaderboard(lb);
+        setLeaderboardLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // Focus Timer State (25 mins = 1500 secs)
   const [timerSeconds, setTimerSeconds] = useState(1500);
@@ -100,31 +135,53 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Add new task
-  const handleAddTask = (e: React.FormEvent) => {
+  // Add new task — writes to Supabase, not just local state.
+  const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTaskTitle.trim()) return;
+    if (!newTaskTitle.trim() || !authUser) return;
 
-    const newTask: Task = {
-      id: Date.now().toString(),
-      title: newTaskTitle.trim(),
-      category: newTaskCategory,
-      completed: false,
-      estimatedMinutes: 30
-    };
-
-    setTasks([newTask, ...tasks]);
+    const title = newTaskTitle.trim();
     setNewTaskTitle('');
+
+    const { task, error } = await createDbTask(authUser.id, title, newTaskCategory);
+    if (error || !task) {
+      console.error('Failed to create task:', error);
+      return;
+    }
+    setTasks(prev => [
+      { id: task.id, title: task.title, category: task.category, completed: false, estimatedMinutes: 30 },
+      ...prev,
+    ]);
   };
 
-  // Toggle task completed state
-  const toggleTask = (id: string) => {
-    setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+  // Toggle task completed state — persists to Supabase and updates streak.
+  const toggleTask = async (id: string) => {
+    const current = tasks.find(t => t.id === id);
+    if (!current) return;
+    const currentStatus: 'pending' | 'done' = current.completed ? 'done' : 'pending';
+
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+
+    const { error } = await toggleDbTaskStatus(id, currentStatus);
+    if (error) {
+      console.error('Failed to update task:', error);
+      // Revert on failure
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: current.completed } : t));
+      return;
+    }
+
+    // If the task just became "done", update the user's streak.
+    if (currentStatus === 'pending' && authUser && profile) {
+      const { profile: updated } = await updateStreakOnTaskComplete(authUser.id, profile);
+      if (updated) setProfile(updated);
+    }
   };
 
-  // Delete task
-  const deleteTask = (id: string) => {
-    setTasks(tasks.filter(t => t.id !== id));
+  // Delete task — removes from Supabase too.
+  const deleteTask = async (id: string) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+    const { error } = await deleteDbTask(id);
+    if (error) console.error('Failed to delete task:', error);
   };
 
   // Filter tasks by selected category
@@ -134,6 +191,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
 
   const completedCount = tasks.filter(t => t.completed).length;
   const progressPercent = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
+
+  // Own rank on the real leaderboard, if present.
+  const ownRank = authUser ? leaderboard.find(l => l.userId === authUser.id)?.rank : undefined;
 
   return (
     <div className="min-h-screen bg-slate-50/70 pb-20">
@@ -194,7 +254,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
                 <span>Current Streak</span>
                 <Flame className="w-4 h-4 text-amber-400 fill-amber-400" />
               </div>
-              <p className="text-2xl font-black mt-1 text-white">7 Days 🔥</p>
+              <p className="text-2xl font-black mt-1 text-white">
+                {profile ? `${profile.current_streak || 0} Days 🔥` : '—'}
+              </p>
             </div>
 
             <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/15">
@@ -207,10 +269,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
 
             <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/15">
               <div className="flex items-center justify-between text-indigo-200 text-xs font-medium">
-                <span>Study Time</span>
+                <span>Longest Streak</span>
                 <Clock className="w-4 h-4 text-sky-300" />
               </div>
-              <p className="text-2xl font-black mt-1 text-white">3h 45m</p>
+              <p className="text-2xl font-black mt-1 text-white">
+                {profile ? `${profile.longest_streak || 0} Days` : '—'}
+              </p>
             </div>
 
             <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/15">
@@ -218,7 +282,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
                 <span>Weekly Rank</span>
                 <Trophy className="w-4 h-4 text-amber-300" />
               </div>
-              <p className="text-2xl font-black mt-1 text-white">#5 in Class</p>
+              <p className="text-2xl font-black mt-1 text-white">
+                {ownRank ? `#${ownRank} in Class` : '—'}
+              </p>
             </div>
           </div>
         </div>
@@ -302,7 +368,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
 
               {/* Tasks List */}
               <div className="space-y-2.5">
-                {filteredTasks.length === 0 ? (
+                {!authUser ? (
+                  <div className="text-center py-8 text-slate-400 text-sm">
+                    Sign in with Google to create and track your tasks.
+                  </div>
+                ) : tasksLoading ? (
+                  <div className="text-center py-8 text-slate-400 text-sm">
+                    Loading your tasks...
+                  </div>
+                ) : filteredTasks.length === 0 ? (
                   <div className="text-center py-8 text-slate-400 text-sm">
                     No tasks found for category "{selectedCategory}". Add one above!
                   </div>
@@ -363,99 +437,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
                   </div>
                 </div>
 
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200/60">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                  Live Rooms
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-200/60">
+                  Coming Soon
                 </span>
               </div>
 
-              {/* Rooms List */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {INITIAL_ROOMS.map(room => (
-                  <div key={room.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-200 transition-all flex flex-col justify-between space-y-3">
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
-                          {room.subject}
-                        </span>
-                        <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
-                          <Users className="w-3.5 h-3.5" />
-                          {room.activeMembers}/{room.maxMembers} Online
-                        </span>
-                      </div>
-                      <h4 className="font-bold text-slate-900 text-sm leading-snug">{room.name}</h4>
-                      <p className="text-xs text-slate-500 mt-1">Host: {room.hostName}</p>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                      <div className="flex gap-1">
-                        {room.tags.map(t => (
-                          <span key={t} className="text-[10px] text-slate-500 bg-slate-200/60 px-1.5 py-0.5 rounded">
-                            #{t}
-                          </span>
-                        ))}
-                      </div>
-                      <button
-                        onClick={() => setActiveRoom(room)}
-                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-lg shadow-2xs transition-all"
-                      >
-                        Join Room
-                      </button>
-                    </div>
-                  </div>
-                ))}
+              {/* No real backend for rooms yet — shown honestly instead of fake room data */}
+              <div className="text-center py-10 text-slate-400 text-sm space-y-2">
+                <Users className="w-8 h-8 mx-auto text-slate-300" />
+                <p>Live study rooms aren't built yet — this feature needs a realtime backend (presence, room membership) that hasn't been wired up.</p>
               </div>
-
-              {/* Active Room Modal / Drawer */}
-              {activeRoom && (
-                <div className="p-5 bg-indigo-900 text-white rounded-2xl space-y-4 animate-fade-in border border-indigo-700">
-                  <div className="flex items-center justify-between border-b border-indigo-800 pb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
-                      <h3 className="font-bold text-base">{activeRoom.name}</h3>
-                    </div>
-                    <button 
-                      onClick={() => setActiveRoom(null)}
-                      className="text-xs bg-indigo-800 hover:bg-indigo-700 text-indigo-200 px-2.5 py-1 rounded-lg"
-                    >
-                      Leave Room
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                    <div className="bg-indigo-950/60 p-3.5 rounded-xl space-y-2 border border-indigo-800/80">
-                      <p className="font-bold text-indigo-200 uppercase tracking-wider text-[10px]">Active Buddies in Room</p>
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center font-bold">RS</div>
-                        <span>Rohan Sharma (Host)</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center font-bold">PP</div>
-                        <span>Priya Patel</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center font-bold text-slate-900">AK</div>
-                        <span>Akshat Kumar (You)</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-indigo-950/60 p-3.5 rounded-xl space-y-2 border border-indigo-800/80">
-                      <p className="font-bold text-indigo-200 uppercase tracking-wider text-[10px]">Shared Focus Beats & Sound</p>
-                      <div className="flex items-center justify-between">
-                        <span>Lofi Girl Study Stream</span>
-                        <button
-                          onClick={() => setAudioLofi(!audioLofi)}
-                          className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded-md text-xs"
-                        >
-                          {audioLofi ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-                          {audioLofi ? 'Mute Lofi' : 'Play Lofi'}
-                        </button>
-                      </div>
-                      <p className="text-[10px] text-indigo-300">Keep mic muted unless asking a quick doubt!</p>
-                    </div>
-                  </div>
-                </div>
-              )}
 
             </div>
 
@@ -473,7 +464,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
                 </div>
                 <div className="flex items-center gap-1 text-xs font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">
                   <Flame className="w-3.5 h-3.5 fill-amber-500" />
-                  <span>7 Day Streak</span>
+                  <span>{profile ? `${profile.current_streak || 0} Day Streak` : 'Sign in to track streak'}</span>
                 </div>
               </div>
 
@@ -558,38 +549,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
               </div>
 
               <div className="space-y-2.5">
-                {INITIAL_LEADERBOARD.map(user => (
-                  <div
-                    key={user.rank}
-                    className={`p-3 rounded-xl flex items-center justify-between text-xs transition-all ${
-                      user.name.includes('(You)')
-                        ? 'bg-indigo-50 border border-indigo-200 font-bold text-indigo-900'
-                        : 'bg-slate-50/70 border border-slate-100 text-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className={`w-5 text-center font-extrabold ${
-                        user.rank === 1 ? 'text-amber-500 text-sm' :
-                        user.rank === 2 ? 'text-slate-400 text-sm' :
-                        user.rank === 3 ? 'text-amber-700 text-sm' : 'text-slate-500'
-                      }`}>
-                        #{user.rank}
-                      </span>
-                      <div className="w-7 h-7 rounded-full bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-[10px]">
-                        {user.avatar}
-                      </div>
-                      <div>
-                        <p className="font-semibold">{user.name}</p>
-                        <p className="text-[10px] text-slate-400">{user.studyHours}h studied</p>
-                      </div>
-                    </div>
-
-                    <div className="text-right">
-                      <span className="font-bold text-indigo-600 block">{user.points} pts</span>
-                      <span className="text-[10px] text-amber-600 font-medium">🔥 {user.streakDays}d streak</span>
-                    </div>
+                {leaderboardLoading ? (
+                  <div className="text-center py-6 text-slate-400 text-xs">Loading leaderboard...</div>
+                ) : leaderboard.length === 0 ? (
+                  <div className="text-center py-6 text-slate-400 text-xs">
+                    No completed tasks yet this week — be the first on the board!
                   </div>
-                ))}
+                ) : (
+                  leaderboard.map(entry => {
+                    const isYou = authUser && entry.userId === authUser.id;
+                    return (
+                      <div
+                        key={entry.userId}
+                        className={`p-3 rounded-xl flex items-center justify-between text-xs transition-all ${
+                          isYou
+                            ? 'bg-indigo-50 border border-indigo-200 font-bold text-indigo-900'
+                            : 'bg-slate-50/70 border border-slate-100 text-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className={`w-5 text-center font-extrabold ${
+                            entry.rank === 1 ? 'text-amber-500 text-sm' :
+                            entry.rank === 2 ? 'text-slate-400 text-sm' :
+                            entry.rank === 3 ? 'text-amber-700 text-sm' : 'text-slate-500'
+                          }`}>
+                            #{entry.rank}
+                          </span>
+                          <div className="w-7 h-7 rounded-full bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-[10px]">
+                            {entry.name.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-semibold">{entry.name}{isYou ? ' (You)' : ''}</p>
+                            <p className="text-[10px] text-slate-400">{entry.target_exam}</p>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="font-bold text-indigo-600 block">{entry.tasksCompletedThisWeek} tasks</span>
+                          <span className="text-[10px] text-slate-400 font-medium">this week</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
 
