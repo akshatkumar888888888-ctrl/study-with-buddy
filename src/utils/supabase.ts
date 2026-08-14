@@ -68,14 +68,87 @@ export async function signInWithGoogle(redirectTo?: string) {
     provider: 'google',
     options: {
       redirectTo: redirectUrl,
+      // access_type: 'offline' + prompt: 'consent' are what make Google hand back
+      // a refresh_token (not just a short-lived access token) on this sign-in —
+      // required so the backend can sync Calendar/Tasks later without the user
+      // needing to stay logged in. See captureGoogleTokensOnSignIn() below.
       queryParams: {
         access_type: 'offline',
         prompt: 'consent',
       },
+      // Calendar + Tasks scopes, on top of Supabase's default openid/email/profile,
+      // so the same Google sign-in also grants "Study with Buddy" permission to
+      // create/update tasks and events on the student's behalf.
+      scopes: [
+        'https://www.googleapis.com/auth/tasks',
+        'https://www.googleapis.com/auth/calendar.events',
+      ].join(' '),
     },
   });
 
   return { data, error };
+}
+
+/**
+ * Call once right after a SIGNED_IN auth event (see App.tsx). Supabase only
+ * includes `provider_refresh_token` in the *first* session after the user
+ * grants consent, so this hands it off to the google-store-tokens Edge
+ * Function to persist server-side, where the sync functions can use it.
+ * Safe to call on every sign-in — if there's no refresh token in this
+ * particular session (e.g. re-login without re-consenting), it's a no-op.
+ */
+export async function captureGoogleTokensOnSignIn(session: {
+  provider_token?: string | null;
+  provider_refresh_token?: string | null;
+}) {
+  if (!isSupabaseConfigured || !session.provider_refresh_token) return;
+
+  try {
+    await supabase.functions.invoke('google-store-tokens', {
+      body: {
+        provider_token: session.provider_token,
+        provider_refresh_token: session.provider_refresh_token,
+      },
+    });
+  } catch (err) {
+    console.error('Failed to store Google tokens:', err);
+  }
+}
+
+/**
+ * Push one task's create/update/delete to Google Tasks + Calendar.
+ * Fire-and-forget from the UI's point of view — if the user hasn't connected
+ * Google, or the call fails, the task's local/Supabase state is unaffected.
+ */
+export async function syncTaskToGoogle(taskId: string, action: 'upsert' | 'delete'): Promise<{ synced: boolean; error?: any }> {
+  if (!isSupabaseConfigured) return { synced: false };
+
+  try {
+    const { data, error } = await supabase.functions.invoke('google-sync-task', {
+      body: { taskId, action },
+    });
+    if (error) return { synced: false, error };
+    return { synced: !!data?.synced };
+  } catch (err) {
+    return { synced: false, error: err };
+  }
+}
+
+/**
+ * Two-way sync pass: pushes any never-synced local tasks to Google, and pulls
+ * back anything created/edited/completed directly in Google Tasks or Calendar.
+ * Call this from a "Sync now" button, and optionally on a timer/page load.
+ */
+export async function pullGoogleSync(): Promise<{ synced: boolean; pushed?: number; pulledIn?: number; pulledUpdates?: number; error?: any }> {
+  if (!isSupabaseConfigured) return { synced: false };
+
+  try {
+    const { data, error } = await supabase.functions.invoke('google-sync-pull', { body: {} });
+    if (error) return { synced: false, error };
+    return { synced: !!data?.synced, pushed: data?.pushed, pulledIn: data?.pulledIn, pulledUpdates: data?.pulledUpdates };
+  } catch (err) {
+    return { synced: false, error: err };
+  }
 }
 
 /**
