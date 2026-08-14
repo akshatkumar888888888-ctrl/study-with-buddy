@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   CheckSquare, Flame, Users, Trophy, Hourglass, Plus, Trash2, 
   CheckCircle2, Circle, Play, Pause, RotateCcw, Volume2, VolumeX,
-  Sparkles, Award, Calendar, BookOpen, Clock, ChevronRight, UserCheck, LogOut, LogIn
+  Sparkles, Award, Calendar, BookOpen, Clock, ChevronRight, ChevronLeft, UserCheck, LogOut, LogIn
 } from 'lucide-react';
 import { Task, TaskCategory, Profile, WeeklyLeaderboardEntry } from '../types';
 import {
@@ -35,6 +35,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
   // Real profile data (name, current streak) from Supabase — no fallback mock.
   const [profile, setProfile] = useState<Profile | null>(null);
 
+  // Which calendar date the to-do list is showing — like Google Calendar's
+  // day view. Defaults to today but the user can navigate to any past date.
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+
   // Tasks state — starts empty and is loaded from Supabase for the signed-in user.
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
@@ -46,7 +51,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
   const [leaderboard, setLeaderboard] = useState<WeeklyLeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
 
-  // Load profile + today's tasks whenever the signed-in user changes.
+  // Step the selected date backward/forward by one day.
+  const shiftDate = (deltaDays: number) => {
+    const d = new Date(selectedDate + 'T00:00:00');
+    d.setDate(d.getDate() + deltaDays);
+    setSelectedDate(d.toISOString().split('T')[0]);
+  };
+
+  // Human-friendly label for the date bar: "Today", "Yesterday", or a full date.
+  const formatDateLabel = (dateStr: string) => {
+    const yesterday = new Date(todayStr + 'T00:00:00');
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    if (dateStr === todayStr) return 'Today';
+    if (dateStr === yesterdayStr) return 'Yesterday';
+
+    return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-IN', {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
+    });
+  };
+
+  // Load profile + this date's tasks whenever the signed-in user or selected date changes.
   useEffect(() => {
     if (!authUser || !isSupabaseConfigured) {
       setProfile(null);
@@ -65,7 +91,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
       if (!cancelled) setProfile(p);
 
       setTasksLoading(true);
-      const { tasks: dbTasks } = await fetchTasksForToday(authUser.id);
+      const { tasks: dbTasks } = await fetchTasksForToday(authUser.id, selectedDate);
       if (!cancelled) {
         setTasks(
           dbTasks.map(t => ({
@@ -81,7 +107,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
     })();
 
     return () => { cancelled = true; };
-  }, [authUser?.id]);
+  }, [authUser?.id, selectedDate]);
 
   // Load the real weekly leaderboard once on mount (visible to everyone, signed in or not).
   useEffect(() => {
@@ -143,7 +169,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
     const title = newTaskTitle.trim();
     setNewTaskTitle('');
 
-    const { task, error } = await createDbTask(authUser.id, title, newTaskCategory);
+    const { task, error } = await createDbTask(authUser.id, title, newTaskCategory, selectedDate);
     if (error || !task) {
       console.error('Failed to create task:', error);
       return;
@@ -320,6 +346,52 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
                 </div>
               </div>
 
+              {/* Date Navigation Bar — Google Calendar-style day switcher.
+                  Lets the user browse and manage tasks for any date, past or future. */}
+              <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2">
+                <button
+                  onClick={() => shiftDate(-1)}
+                  className="p-1.5 rounded-lg hover:bg-white text-slate-500 hover:text-indigo-600 transition-colors"
+                  title="Previous day"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <Calendar className="w-4 h-4 text-indigo-600" />
+                  <span>{formatDateLabel(selectedDate)}</span>
+                  {selectedDate !== todayStr && (
+                    <span className="text-[10px] font-medium text-slate-400">({selectedDate})</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  {selectedDate !== todayStr && (
+                    <button
+                      onClick={() => setSelectedDate(todayStr)}
+                      className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 px-2 py-1 rounded-lg hover:bg-white transition-colors"
+                    >
+                      Today
+                    </button>
+                  )}
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    max={todayStr}
+                    onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+                    className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                  <button
+                    onClick={() => shiftDate(1)}
+                    disabled={selectedDate >= todayStr}
+                    className="p-1.5 rounded-lg hover:bg-white text-slate-500 hover:text-indigo-600 transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                    title="Next day"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
               {/* Add New Task Form */}
               <form onSubmit={handleAddTask} className="flex flex-col sm:flex-row gap-3">
                 <input
@@ -378,7 +450,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBackToHome, authUser }) 
                   </div>
                 ) : filteredTasks.length === 0 ? (
                   <div className="text-center py-8 text-slate-400 text-sm">
-                    No tasks found for category "{selectedCategory}". Add one above!
+                    No tasks found for category "{selectedCategory}" on {formatDateLabel(selectedDate)}. Add one above!
                   </div>
                 ) : (
                   filteredTasks.map(task => (
