@@ -1,25 +1,21 @@
 import React, { useState } from 'react';
-import { BookOpen, Users, Calendar, Award, CheckSquare, Menu, X, LogIn, LayoutDashboard } from 'lucide-react';
+import { BookOpen, Award, Menu, X } from 'lucide-react';
 import { signInWithGoogle } from '../utils/supabase';
 import { User } from '@supabase/supabase-js';
 
 interface NavbarProps {
-  currentView: 'home' | 'dashboard';
-  setCurrentView: (view: 'home' | 'dashboard') => void;
   authUser: User | null;
 }
 
 /**
  * Navbar Component
- * Equivalent in Next.js: app/components/Navbar.tsx or components/Navbar.tsx
- * 
- * Features:
- * - Logo text "Study with Buddy"
- * - Navigation links to Home and Dashboard
- * - "Sign In" button calling Supabase Google OAuth
- * - Fully responsive for mobile screens
+ *
+ * Now a lightweight top bar for the single-page Dashboard app:
+ * - Logo
+ * - Quick jump to the Leaderboard section
+ * - Sign-in / signed-in-as indicator
  */
-export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, authUser }) => {
+export const Navbar: React.FC<NavbarProps> = ({ authUser }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -38,30 +34,18 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, aut
     // nothing else to do here.
   };
 
-  // Navigate into the Dashboard view and scroll to a specific section inside it.
-  // These aren't real pages (this is a single-page app with no router), so
-  // plain <a href="/rooms"> links would 404 on the live site. We switch the
-  // in-app view, then scroll to the section once it's rendered.
-  const goToDashboardSection = (sectionId?: string) => {
-    setCurrentView('dashboard');
-    if (sectionId) {
-      setTimeout(() => {
-        document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
-    }
+  const scrollToLeaderboard = () => {
+    document.getElementById('leaderboard-section')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   return (
     <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-sm border-b border-slate-100 transition-all">
       <div className="max-w-7xl mx-auto px-6 md:px-10">
         <div className="flex items-center justify-between h-20">
-          
+
           {/* Logo Section */}
-          <button 
-            onClick={() => setCurrentView('home')} 
-            className="flex items-center gap-3 group text-left focus:outline-none"
-          >
-            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-200 group-hover:bg-indigo-700 transition-colors">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-200">
               <BookOpen className="w-5 h-5" />
             </div>
             <div>
@@ -72,40 +56,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, aut
                 Class 12 Study Hub
               </span>
             </div>
-          </button>
+          </div>
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-500">
             <button
-              onClick={() => setCurrentView('home')}
-              className={`transition-colors hover:text-indigo-600 ${
-                currentView === 'home'
-                  ? 'text-indigo-600 font-bold'
-                  : 'text-slate-500'
-              }`}
-            >
-              Home
-            </button>
-            <button
-              onClick={() => goToDashboardSection()}
-              className={`flex items-center gap-1.5 transition-colors hover:text-indigo-600 ${
-                currentView === 'dashboard'
-                  ? 'text-indigo-600 font-bold'
-                  : 'text-slate-500'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              Dashboard
-            </button>
-            <button
-              onClick={() => goToDashboardSection('rooms-section')}
-              className="hover:text-indigo-600 transition-colors flex items-center gap-1"
-            >
-              <Users className="w-4 h-4" />
-              Buddy Rooms 🎧
-            </button>
-            <button
-              onClick={() => goToDashboardSection('leaderboard-section')}
+              onClick={scrollToLeaderboard}
               className="hover:text-indigo-600 transition-colors flex items-center gap-1"
             >
               <Award className="w-4 h-4" />
@@ -113,7 +69,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, aut
             </button>
           </nav>
 
-          {/* Desktop Auth & Get Started Buttons */}
+          {/* Desktop Auth */}
           <div className="hidden md:flex items-center gap-4">
             {authUser ? (
               <span className="text-sm font-semibold text-slate-700 px-2 py-1">
@@ -122,17 +78,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, aut
             ) : (
               <button
                 onClick={handleSignIn}
-                className="text-sm font-semibold text-slate-700 hover:text-indigo-600 transition-colors px-2 py-1"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-full text-sm font-bold shadow-lg shadow-indigo-100 transition-all active:scale-95"
               >
-                Sign In
+                Sign in with Google
               </button>
             )}
-            <button
-              onClick={() => setCurrentView('dashboard')}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-full text-sm font-bold shadow-lg shadow-indigo-100 transition-all active:scale-95"
-            >
-              {authUser ? 'Dashboard' : 'Get Started'}
-            </button>
           </div>
 
           {/* Mobile menu button */}
@@ -153,37 +103,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, aut
         <div className="md:hidden bg-white border-b border-slate-100 px-6 pt-2 pb-6 space-y-3 shadow-xl">
           <button
             onClick={() => {
-              setCurrentView('home');
+              scrollToLeaderboard();
               setMobileMenuOpen(false);
             }}
-            className={`w-full text-left px-3 py-2 rounded-xl text-base font-medium ${
-              currentView === 'home' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-700'
-            }`}
+            className="w-full text-left px-3 py-2 rounded-xl text-base font-medium text-slate-700 flex items-center gap-2"
           >
-            Home
+            <Award className="w-4 h-4" />
+            Leaderboard
           </button>
-          <button
-            onClick={() => {
-              setCurrentView('dashboard');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-xl text-base font-medium flex items-center gap-2 ${
-              currentView === 'dashboard' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-700'
-            }`}
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            Dashboard
-          </button>
-          <a
-            href="#features"
-            onClick={() => {
-              if (currentView === 'dashboard') setCurrentView('home');
-              setMobileMenuOpen(false);
-            }}
-            className="block px-3 py-2 rounded-xl text-base font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Features
-          </a>
           <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
             {authUser ? (
               <span className="w-full text-slate-700 font-semibold py-2 text-center">
@@ -195,20 +122,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, aut
                   handleSignIn();
                   setMobileMenuOpen(false);
                 }}
-                className="w-full text-slate-700 hover:text-indigo-600 font-semibold py-2 text-center"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-full shadow-lg shadow-indigo-100 text-center"
               >
-                Sign In
+                Sign in with Google
               </button>
             )}
-            <button
-              onClick={() => {
-                setCurrentView('dashboard');
-                setMobileMenuOpen(false);
-              }}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-full shadow-lg shadow-indigo-100 text-center"
-            >
-              Get Started
-            </button>
           </div>
         </div>
       )}
