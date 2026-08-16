@@ -219,6 +219,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ authUser }) => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  // Convert a stored 24-hour "HH:MM" task time into a friendly 12-hour AM/PM
+  // string for display (e.g. "14:30" -> "2:30 PM"). The <input type="time">
+  // itself always stores/returns 24-hour "HH:MM" — that's an HTML standard we
+  // can't change — but everywhere we *show* the time to the student, we show
+  // AM/PM.
+  const formatTime12h = (time24: string) => {
+    const [hStr, mStr] = time24.split(':');
+    let h = parseInt(hStr, 10);
+    const m = mStr;
+    const period = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${m} ${period}`;
+  };
+
   // ============================= EXAM COUNTDOWN (multi-exam) =============================
   const [exams, setExams] = useState<Exam[]>([]);
   const [examsLoading, setExamsLoading] = useState(false);
@@ -635,6 +650,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ authUser }) => {
                       type="time"
                       value={newTaskTime}
                       onChange={(e) => setNewTaskTime(e.target.value)}
+                      lang="en-US"
                       className="bg-transparent text-sm text-slate-700 focus:outline-none w-full"
                       title="Optional time of day"
                     />
@@ -771,7 +787,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ authUser }) => {
                             {task.time && (
                               <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 font-medium">
                                 <Clock className="w-3 h-3" />
-                                {task.time}
+                                {formatTime12h(task.time)}
                               </span>
                             )}
                             {repeatLabel(task) && (
