@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Profile, DbTask, WeeklyLeaderboardEntry } from '../types';
+import { Profile, DbTask, WeeklyLeaderboardEntry, Exam, RepeatRule } from '../types';
 
 /**
  * ==============================================================================
@@ -442,6 +442,8 @@ export async function fetchTasksForToday(userId: string, dateStr?: string): Prom
           category: 'Physics',
           status: 'done',
           date: targetDate,
+          time: '09:00',
+          repeat: 'none',
           created_at: new Date().toISOString(),
           completed_at: new Date().toISOString()
         },
@@ -452,6 +454,8 @@ export async function fetchTasksForToday(userId: string, dateStr?: string): Prom
           category: 'Chemistry',
           status: 'pending',
           date: targetDate,
+          time: '17:30',
+          repeat: 'daily',
           created_at: new Date().toISOString()
         },
         {
@@ -461,6 +465,8 @@ export async function fetchTasksForToday(userId: string, dateStr?: string): Prom
           category: 'Math',
           status: 'pending',
           date: targetDate,
+          time: null,
+          repeat: 'none',
           created_at: new Date().toISOString()
         }
       ],
@@ -479,35 +485,93 @@ export async function fetchTasksForToday(userId: string, dateStr?: string): Prom
 }
 
 /**
- * Create a new task in Supabase
+ * Build the list of calendar dates (YYYY-MM-DD) a repeating task should land on.
+ * - 'none'   -> just the start date
+ * - 'daily'  -> every day from start date through repeatUntil (inclusive)
+ * - 'custom' -> only the chosen weekdays (0=Sun ... 6=Sat), from start date
+ *               through repeatUntil (inclusive)
+ * Capped at 90 days out so a single "repeat" add can't create unbounded rows.
  */
-export async function createDbTask(
-  userId: string, 
-  title: string, 
-  category: 'Physics' | 'Chemistry' | 'Math' | 'English' | 'Other', 
-  dateStr?: string
-): Promise<{ task: DbTask | null; error: any }> {
-  const targetDate = dateStr || new Date().toISOString().split('T')[0];
+export function buildRepeatDates(
+  startDateStr: string,
+  repeat: RepeatRule,
+  repeatDays: number[] | undefined,
+  repeatUntilStr?: string
+): string[] {
+  if (!repeat || repeat === 'none') return [startDateStr];
 
-  if (!isSupabaseConfigured) {
-    return { task: null, error: new Error('Supabase is not configured.') };
+  const MAX_DAYS = 90;
+  const start = new Date(startDateStr + 'T00:00:00');
+  const cap = new Date(start);
+  cap.setDate(cap.getDate() + MAX_DAYS);
+
+  let end = cap;
+  if (repeatUntilStr) {
+    const requested = new Date(repeatUntilStr + 'T00:00:00');
+    if (requested < cap) end = requested;
   }
 
-  const newTask = {
+  const dates: string[] = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    const dow = cursor.getDay(); // 0=Sun ... 6=Sat
+    const include = repeat === 'daily' || (repeat === 'custom' && (repeatDays || []).includes(dow));
+    if (include) dates.push(cursor.toISOString().split('T')[0]);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  // Always guarantee at least the start date, even if custom days didn't match it.
+  return dates.length > 0 ? dates : [startDateStr];
+}
+
+export interface CreateTaskOptions {
+  time?: string | null;
+  repeat?: RepeatRule;
+  repeatDays?: number[];
+  repeatUntil?: string;
+}
+
+/**
+ * Create a new task in Supabase. When `options.repeat` is 'daily' or 'custom',
+ * this inserts one row per matching date (all sharing a repeat_group_id) so
+ * each date can be completed/edited independently, exactly like the rest of
+ * the to-do list.
+ */
+export async function createDbTask(
+  userId: string,
+  title: string,
+  category: 'Physics' | 'Chemistry' | 'Math' | 'English' | 'Other',
+  dateStr?: string,
+  options: CreateTaskOptions = {}
+): Promise<{ tasks: DbTask[]; error: any }> {
+  const targetDate = dateStr || new Date().toISOString().split('T')[0];
+  const { time = null, repeat = 'none', repeatDays = [], repeatUntil } = options;
+
+  if (!isSupabaseConfigured) {
+    return { tasks: [], error: new Error('Supabase is not configured.') };
+  }
+
+  const dates = buildRepeatDates(targetDate, repeat, repeatDays, repeatUntil);
+  const repeatGroupId = dates.length > 1 ? crypto.randomUUID() : null;
+
+  const rows = dates.map(date => ({
     user_id: userId,
     title,
     category,
     status: 'pending' as const,
-    date: targetDate
-  };
+    date,
+    time,
+    repeat,
+    repeat_days: repeat === 'custom' ? repeatDays : null,
+    repeat_group_id: repeatGroupId,
+  }));
 
   const { data, error } = await supabase
     .from('tasks')
-    .insert(newTask)
-    .select()
-    .single();
+    .insert(rows)
+    .select();
 
-  return { task: data as DbTask, error };
+  return { tasks: (data || []) as DbTask[], error };
 }
 
 /**
@@ -549,6 +613,84 @@ export async function deleteDbTask(taskId: string): Promise<{ error: any }> {
     .from('tasks')
     .delete()
     .eq('id', taskId);
+
+  return { error };
+}
+
+/**
+ * ==============================================================================
+ * EXAM COUNTDOWN — MULTIPLE EXAMS PER STUDENT
+ * ==============================================================================
+ * Backed by the `exams` table when Supabase is configured (see supabase_schema.sql),
+ * so exams sync across devices. Falls back to localStorage when Supabase isn't
+ * configured, so the countdown still works (and persists on this browser) in
+ * the demo/local-only environment.
+ */
+const LOCAL_EXAMS_KEY = 'swb_exams_v1';
+
+function readLocalExams(userId: string): Exam[] {
+  try {
+    const raw = localStorage.getItem(`${LOCAL_EXAMS_KEY}:${userId}`);
+    return raw ? (JSON.parse(raw) as Exam[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalExams(userId: string, exams: Exam[]) {
+  try {
+    localStorage.setItem(`${LOCAL_EXAMS_KEY}:${userId}`, JSON.stringify(exams));
+  } catch {
+    // ignore storage errors (e.g. private browsing quota)
+  }
+}
+
+export async function fetchExams(userId: string): Promise<{ exams: Exam[]; error: any }> {
+  if (!isSupabaseConfigured) {
+    return { exams: readLocalExams(userId), error: null };
+  }
+
+  const { data, error } = await supabase
+    .from('exams')
+    .select('*')
+    .eq('user_id', userId)
+    .order('date', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching exams:', error);
+    return { exams: [], error };
+  }
+  return { exams: (data || []) as Exam[], error: null };
+}
+
+export async function createExam(userId: string, name: string, date: string): Promise<{ exam: Exam | null; error: any }> {
+  if (!isSupabaseConfigured) {
+    const exam: Exam = { id: crypto.randomUUID(), name, date, user_id: userId, created_at: new Date().toISOString() };
+    const exams = [...readLocalExams(userId), exam].sort((a, b) => a.date.localeCompare(b.date));
+    writeLocalExams(userId, exams);
+    return { exam, error: null };
+  }
+
+  const { data, error } = await supabase
+    .from('exams')
+    .insert({ user_id: userId, name, date })
+    .select()
+    .single();
+
+  if (error) console.error('Error creating exam:', error);
+  return { exam: data as Exam, error };
+}
+
+export async function deleteExam(userId: string, examId: string): Promise<{ error: any }> {
+  if (!isSupabaseConfigured) {
+    writeLocalExams(userId, readLocalExams(userId).filter(e => e.id !== examId));
+    return { error: null };
+  }
+
+  const { error } = await supabase
+    .from('exams')
+    .delete()
+    .eq('id', examId);
 
   return { error };
 }
