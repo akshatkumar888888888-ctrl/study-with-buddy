@@ -28,10 +28,7 @@ export const Footer: React.FC = () => {
 
           {/* Links */}
           <div className="flex flex-wrap items-center justify-center gap-6 text-sm">
-            <a href="#features" className="hover:text-white transition-colors">Features</a>
-            <a href="#" className="hover:text-white transition-colors">Daily To-Do</a>
-            <a href="#" className="hover:text-white transition-colors">Study Rooms</a>
-            <a href="#" className="hover:text-white transition-colors">Leaderboard</a>
+            <a href="#leaderboard-section" className="hover:text-white transition-colors">Leaderboard</a>
           </div>
 
           {/* Copyright */}
