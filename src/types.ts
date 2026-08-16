@@ -6,6 +6,9 @@
 // Category types for tasks
 export type TaskCategory = 'Physics' | 'Chemistry' | 'Math' | 'English' | 'Other';
 
+// Repeat rule for a to-do task
+export type RepeatRule = 'none' | 'daily' | 'custom';
+
 // To-Do Task item interface (for legacy app UI compatibility)
 export interface Task {
   id: string;
@@ -13,7 +16,11 @@ export interface Task {
   category: TaskCategory;
   completed: boolean;
   dueDate?: string;
+  time?: string | null; // "HH:MM" 24-hour time this task is scheduled for
   estimatedMinutes: number;
+  repeat?: RepeatRule; // whether this task repeats
+  repeatDays?: number[]; // for 'custom': 0=Sun ... 6=Sat
+  repeatGroupId?: string | null; // links all instances generated from one repeating task
   googleTaskId?: string | null; // set once this task is synced to Google Tasks
   googleEventId?: string | null; // set once a matching Google Calendar event exists
 }
@@ -39,34 +46,15 @@ export interface DbTask {
   category: 'Physics' | 'Chemistry' | 'Math' | 'English' | 'Other';
   status: 'pending' | 'done';
   date: string; // YYYY-MM-DD
+  time?: string | null; // "HH:MM"
+  repeat?: RepeatRule;
+  repeat_days?: number[] | null; // 0=Sun ... 6=Sat, used when repeat = 'custom'
+  repeat_group_id?: string | null;
   created_at?: string;
   completed_at?: string | null;
   google_task_id?: string | null;
   google_event_id?: string | null;
   google_synced_at?: string | null;
-}
-
-// Study Buddy Room interface
-export interface StudyRoom {
-  id: string;
-  name: string;
-  subject: string;
-  activeMembers: number;
-  maxMembers: number;
-  isPrivate: boolean;
-  hostName: string;
-  tags: string[];
-}
-
-// Student Leaderboard entry
-export interface LeaderboardUser {
-  rank: number;
-  name: string;
-  avatar: string;
-  studyHours: number;
-  streakDays: number;
-  points: number;
-  badge?: string;
 }
 
 // Weekly Leaderboard entry (Supabase aggregated)
@@ -78,11 +66,11 @@ export interface WeeklyLeaderboardEntry {
   tasksCompletedThisWeek: number;
 }
 
-// Exam Countdown item
+// Exam Countdown item (multiple exams supported, each with its own live countdown)
 export interface Exam {
   id: string;
   name: string;
-  subject: string;
   date: string; // ISO date format YYYY-MM-DD
-  targetGoal: string;
+  user_id?: string;
+  created_at?: string;
 }
